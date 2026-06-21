@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "peace-habit",
-    "slug": "peace-habit",
+    "name": "habit-flow",
+    "slug": "habit-flow",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "peacehabit",
+    "scheme": "habitflow",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
@@ -38,7 +38,8 @@
             "backgroundColor": "#000000"
           }
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,
