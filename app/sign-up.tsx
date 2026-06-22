@@ -110,7 +110,7 @@ export default function SignUpScreen() {
       // Email confirmation required — navigate to confirmation screen
       router.replace({
         pathname: '/verify-code',
-        params: { email: email.trim() },
+        params: { email: email.trim(), type: 'signup' },
       });
     }
   };

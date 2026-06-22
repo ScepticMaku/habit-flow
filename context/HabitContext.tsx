@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { Habit, mockHabits } from '../constants/data';
+import { Habit } from '../constants/data';
 import { supabase } from '../utils/supabase';
 import { useAuth } from './AuthContext';
 
@@ -51,35 +51,18 @@ export function HabitProvider({ children }: { children: React.ReactNode }) {
 
       if (logsError) throw logsError;
 
-      if (habitsData.length === 0) {
-        const habitsToInsert = mockHabits.map(h => ({
-          user_id: user.id, name: h.name, icon: h.icon, color: h.color,
-          target: h.target, unit: h.unit, time: h.time, category: h.category,
-        }));
+      // Format the habits with today's logs
+      const logsMap = new Map<string, number>();
+      logsData?.forEach(log => logsMap.set(log.habit_id, log.value));
 
-        const { data: seededHabits, error: seedError } = await supabase
-          .from('habits').insert(habitsToInsert).select();
-
-        if (!seedError && seededHabits) {
-          setHabits(seededHabits.map(h => ({
-            id: h.id, name: h.name, icon: h.icon, color: h.color,
-            target: h.target, unit: h.unit, streak: 0, time: h.time,
-            category: h.category, current: 0, completedToday: false,
-          })));
-        }
-      } else {
-        const logsMap = new Map<string, number>();
-        logsData?.forEach(log => logsMap.set(log.habit_id, log.value));
-
-        setHabits(habitsData.map(h => {
-          const currentVal = logsMap.get(h.id) || 0;
-          return {
-            id: h.id, name: h.name, icon: h.icon, color: h.color,
-            target: h.target, unit: h.unit, streak: 0, time: h.time,
-            category: h.category, current: currentVal, completedToday: currentVal >= h.target,
-          };
-        }));
-      }
+      setHabits(habitsData.map(h => {
+        const currentVal = logsMap.get(h.id) || 0;
+        return {
+          id: h.id, name: h.name, icon: h.icon, color: h.color,
+          target: h.target, unit: h.unit, streak: 0, time: h.time,
+          category: h.category, current: currentVal, completedToday: currentVal >= h.target,
+        };
+      }));
     } catch (error) {
       console.error('Error fetching habits:', error);
     } finally {
