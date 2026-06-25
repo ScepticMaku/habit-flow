@@ -21,7 +21,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function SettingsScreen() {
   const { type } = useLocalSearchParams<{ type: string }>();
-  const { user, signOut } = useAuth();
 
   if (type === 'privacy') return <PrivacySettings />;
   if (type === 'about') return <AboutSettings />;
@@ -33,37 +32,65 @@ export default function SettingsScreen() {
 
 // --- PRIVACY & SECURITY ---
 function PrivacySettings() {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete Account',
+      'This action is PERMANENT and cannot be undone. All your habits, streaks, and data will be erased.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Forever',
+          style: 'destructive',
+          onPress: confirmDelete,
+        },
+      ]
+    );
+  };
+
+  const confirmDelete = async () => {
+    setDeleting(true);
+    try {
+      // Call our new Edge Function
+      const { error } = await supabase.functions.invoke('delete-account');
+
+      if (error) throw error;
+
+      // Force log them out and send them to the login screen
+      await signOut();
+      router.replace('/');
+
+    } catch (err: any) {
+      Alert.alert('Deletion Failed', err.message || 'Could not delete account.');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const handleChangePassword = async () => {
+    if (!user?.email) return;
+
     setLoading(true);
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(user?.email || '', {
+      const { error } = await supabase.auth.resetPasswordForEmail(user.email, {
         redirectTo: 'habitflow://reset-password',
       });
+
       if (error) throw error;
-      Alert.alert('Email Sent', 'A password reset link has been sent to your email address.');
+
+      // ✅ Navigate to the verify code screen instead of showing a link alert
+      router.push({
+        pathname: '/verify-code',
+        params: { email: user.email, type: 'recovery' },
+      });
     } catch (err: any) {
       Alert.alert('Error', err.message);
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleDeleteAccount = () => {
-    Alert.alert(
-      'Delete Account',
-      'This action is permanent and cannot be undone. All your habits and history will be erased.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Contact Support', style: 'destructive', onPress: () => {
-            Linking.openURL('mailto:support@habitflow.app?subject=Delete Account Request');
-          }
-        },
-      ]
-    );
   };
 
   return (
@@ -73,7 +100,7 @@ function PrivacySettings() {
         <View style={styles.cardRow}>
           <View style={styles.cardInfo}>
             <Text style={styles.cardLabel}>Password</Text>
-            <Text style={styles.cardSub}>Last changed recently</Text>
+            <Text style={styles.cardSub}>Require code to change</Text>
           </View>
           <TouchableOpacity style={styles.cardBtn} onPress={handleChangePassword} disabled={loading}>
             {loading ? <ActivityIndicator size="small" color={Colors.primary} /> : <Text style={styles.cardBtnText}>Change</Text>}
@@ -89,13 +116,22 @@ function PrivacySettings() {
       </View>
 
       <Text style={styles.sectionTitle}>Danger Zone</Text>
-      <TouchableOpacity style={styles.dangerCard} onPress={handleDeleteAccount} activeOpacity={0.7}>
-        <Ionicons name="trash-outline" size={22} color={Colors.danger} />
+      <TouchableOpacity
+        style={[styles.dangerCard, deleting && styles.dangerCardDisabled]}
+        onPress={handleDeleteAccount}
+        activeOpacity={0.7}
+        disabled={deleting}
+      >
+        {deleting ? (
+          <ActivityIndicator size="small" color={Colors.danger} />
+        ) : (
+          <Ionicons name="trash-outline" size={22} color={Colors.danger} />
+        )}
         <View style={{ flex: 1, marginLeft: Spacing.md }}>
-          <Text style={styles.dangerTitle}>Delete Account</Text>
+          <Text style={styles.dangerTitle}>{deleting ? 'Deleting...' : 'Delete Account'}</Text>
           <Text style={styles.dangerSub}>Permanently remove your data</Text>
         </View>
-        <Ionicons name="chevron-forward" size={18} color={Colors.danger} />
+        {!deleting && <Ionicons name="chevron-forward" size={18} color={Colors.danger} />}
       </TouchableOpacity>
     </SettingsShell>
   );
@@ -196,7 +232,7 @@ function SettingsShell({ title, children }: { title: string; children: React.Rea
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: Colors.bg },
+  safeArea: { paddingTop: 40, flex: 1, backgroundColor: Colors.bg },
   flex: { flex: 1 },
   header: {
     flexDirection: 'row',
@@ -235,4 +271,5 @@ const styles = StyleSheet.create({
   aboutAppName: { fontSize: 32, fontWeight: '800', color: Colors.primary, letterSpacing: -0.5 },
   aboutVersion: { fontSize: 14, color: Colors.textTertiary, marginTop: Spacing.xs },
   copyright: { textAlign: 'center', fontSize: 13, color: Colors.textTertiary, marginTop: Spacing.xxl },
+  dangerCardDisabled: { opacity: 0.6 },
 });

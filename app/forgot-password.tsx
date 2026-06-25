@@ -13,21 +13,37 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Spacing, Radius } from '../constants/theme';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { supabase } from '../utils/supabase'; // <-- ADDED THIS IMPORT
 
 export default function ForgotPasswordScreen() {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSend = () => {
+  const handleSend = async () => { // <-- MADE ASYNC
     if (!email.trim()) {
       Alert.alert('Notice', 'Please enter your email address');
       return;
     }
+
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      router.push('/verify-code');
-    }, 800);
+
+    // ✅ ACTUALLY SEND THE EMAIL VIA SUPABASE
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: 'habitflow://reset-password', // Required for deep linking
+    });
+
+    setLoading(false);
+
+    if (error) {
+      Alert.alert('Error', error.message);
+      return;
+    }
+
+    // Only navigate if the email was successfully sent
+    router.push({
+      pathname: '/verify-code',
+      params: { email: email.trim(), type: 'recovery' },
+    });
   };
 
   return (
@@ -49,7 +65,7 @@ export default function ForgotPasswordScreen() {
 
           <Text style={styles.title}>Forgot Password?</Text>
           <Text style={styles.desc}>
-            No worries! Enter your email address and we'll send you a link to reset your password.
+            No worries! Enter your email address and we'll send you a code to reset your password.
           </Text>
 
           <View style={styles.inputWrap}>
@@ -62,6 +78,7 @@ export default function ForgotPasswordScreen() {
               onChangeText={setEmail}
               keyboardType="email-address"
               autoCapitalize="none"
+              editable={!loading}
             />
           </View>
 
@@ -72,7 +89,7 @@ export default function ForgotPasswordScreen() {
             activeOpacity={0.8}
           >
             <Text style={styles.sendBtnText}>
-              {loading ? 'Sending...' : 'Send Reset Link'}
+              {loading ? 'Sending...' : 'Send Reset Code'}
             </Text>
           </TouchableOpacity>
         </View>

@@ -39,6 +39,7 @@ export default function ProfileScreen() {
   const [stats, setStats] = useState({ streak: 0, totalHabits: 0, rate: 0, totalCompleted: 0, hasHadPerfectDay: false });
   const [unlockedBadges, setUnlockedBadges] = useState<UnlockedBadge[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSigningOut, setIsSigningOut] = useState(false);
 
   useEffect(() => {
     const fetchProfileData = async () => {
@@ -150,12 +151,28 @@ export default function ProfileScreen() {
     fetchProfileData();
   }, [user, habits]);
 
+
   const handleLogout = () => {
     Alert.alert('Log Out', 'Are you sure you want to log out?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Log Out', style: 'destructive', onPress: async () => { await signOut(); router.replace('/'); } },
+      {
+        text: 'Log Out',
+        style: 'destructive',
+        onPress: async () => {
+          setIsSigningOut(true);
+          try {
+            await signOut();
+            router.replace('/');
+          } catch (error) {
+            console.error('Logout error:', error);
+            setIsSigningOut(false);
+            Alert.alert('Error', 'Failed to log out. Please try again.');
+          }
+        }
+      },
     ]);
   };
+
 
   const firstName = user?.user_metadata?.first_name || 'User';
   const lastName = user?.user_metadata?.last_name || '';
@@ -268,9 +285,20 @@ export default function ProfileScreen() {
           </View>
         ))}
 
-        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout} activeOpacity={0.7}>
-          <Ionicons name="log-out-outline" size={20} color={Colors.danger} />
-          <Text style={styles.logoutText}>Log Out</Text>
+        <TouchableOpacity
+          style={[styles.logoutBtn, isSigningOut && styles.logoutBtnDisabled]}
+          onPress={handleLogout}
+          activeOpacity={0.7}
+          disabled={isSigningOut}
+        >
+          {isSigningOut ? (
+            <ActivityIndicator size="small" color={Colors.danger} />
+          ) : (
+            <Ionicons name="log-out-outline" size={20} color={Colors.danger} />
+          )}
+          <Text style={[styles.logoutText, isSigningOut && styles.logoutTextDisabled]}>
+            {isSigningOut ? 'Signing out...' : 'Log Out'}
+          </Text>
         </TouchableOpacity>
 
         <View style={{ height: Spacing.xxxl }} />
@@ -316,4 +344,6 @@ const styles = StyleSheet.create({
   settingLabel: { flex: 1, fontSize: 15, fontWeight: '500', color: Colors.text },
   logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.card, borderRadius: Radius.md, paddingVertical: Spacing.lg, marginTop: Spacing.md, gap: Spacing.sm, shadowColor: Colors.shadow, shadowOffset: { width: 0, height: 1 }, shadowOpacity: 1, shadowRadius: 4, elevation: 1 },
   logoutText: { fontSize: 15, fontWeight: '600', color: Colors.danger },
+  logoutBtnDisabled: { opacity: 0.6 },
+  logoutTextDisabled: { color: Colors.textTertiary },
 });

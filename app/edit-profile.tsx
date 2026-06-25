@@ -40,16 +40,11 @@ export default function EditProfileScreen() {
       Alert.alert('Notice', 'First name cannot be empty.');
       return;
     }
-    if (!email.trim()) {
-      Alert.alert('Notice', 'Email cannot be empty.');
-      return;
-    }
 
     setLoading(true);
     try {
-      // Update name and email in one go
+      // Only update names since email is now uneditable
       const { error } = await supabase.auth.updateUser({
-        email: email.trim(),
         data: {
           first_name: firstName.trim(),
           last_name: lastName.trim(),
@@ -58,20 +53,11 @@ export default function EditProfileScreen() {
 
       if (error) throw error;
 
-      // If they changed their email, Supabase requires confirmation
-      if (email.trim().toLowerCase() !== user?.email?.toLowerCase()) {
-        Alert.alert(
-          'Email Update Sent',
-          'We\'ve sent a confirmation link to your new email address. Please check your inbox to verify it.',
-          [{ text: 'OK', onPress: () => router.back() }]
-        );
-      } else {
-        Alert.alert(
-          'Success',
-          'Profile updated successfully!',
-          [{ text: 'OK', onPress: () => router.back() }]
-        );
-      }
+      Alert.alert(
+        'Success',
+        'Profile updated successfully!',
+        [{ text: 'OK', onPress: () => router.back() }]
+      );
     } catch (error: any) {
       Alert.alert('Update Failed', error.message || 'Something went wrong.');
     } finally {
@@ -125,23 +111,21 @@ export default function EditProfileScreen() {
             />
           </View>
 
-          {/* Email */}
+          {/* Email - NOW UNEDITABLE */}
           <Text style={styles.label}>Email Address</Text>
-          <View style={styles.inputWrap}>
+          <View style={[styles.inputWrap, styles.inputWrapDisabled]}>
             <Ionicons name="mail-outline" size={20} color={Colors.textTertiary} style={{ marginRight: Spacing.md }} />
             <TextInput
-              style={styles.input}
+              style={[styles.input, styles.disabledInput]}
               value={email}
-              onChangeText={setEmail}
               placeholder="Email"
               placeholderTextColor={Colors.textTertiary}
               keyboardType="email-address"
               autoCapitalize="none"
+              editable={false}
+              pointerEvents="none" // Prevents cursor from showing on tap
             />
           </View>
-          <Text style={styles.emailHint}>
-            Changing your email will require you to verify the new address.
-          </Text>
 
           <View style={{ flex: 1 }} />
 
@@ -204,8 +188,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     height: 54,
   },
+  // NEW: Styling for the disabled email wrapper
+  inputWrapDisabled: {
+    backgroundColor: Colors.surface,
+    borderColor: Colors.borderLight,
+  },
   input: { flex: 1, fontSize: 15, color: Colors.text, height: 54 },
-  emailHint: { fontSize: 12, color: Colors.textTertiary, marginTop: Spacing.sm },
+  // NEW: Styling for the disabled text
+  disabledInput: {
+    color: Colors.textTertiary,
+  },
   saveBtn: {
     height: 56,
     backgroundColor: Colors.primary,

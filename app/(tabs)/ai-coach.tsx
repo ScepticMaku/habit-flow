@@ -8,28 +8,48 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius } from '../../constants/theme';
 import { useHabits } from '../../context/HabitContext';
-import { supabase } from '../../utils/supabase'; // Make sure this path matches your project
+import { supabase } from '../../utils/supabase';
 import { AIMessage } from '../../constants/data';
+
+// Add a timeout wrapper
+const withTimeout = (promise: Promise<any>, ms: number): Promise<any> => {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Request timed out')), ms)
+    ),
+  ]);
+};
 
 export default function AICoachScreen() {
   const { habits } = useHabits();
-  // CHANGED: Start with an empty array instead of mockAIMessages
   const [messages, setMessages] = useState<AIMessage[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
 
-  // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     setTimeout(() => {
       scrollViewRef.current?.scrollToEnd({ animated: true });
     }, 100);
   }, [messages, isTyping]);
+
+  const addMessage = (msg: AIMessage) => {
+    setMessages(prev => [...prev, msg]);
+    setError(null);
+  };
+
+  const handleError = (errorMsg: string) => {
+    setError(errorMsg);
+    setIsTyping(false);
+  };
 
   const handleSend = async () => {
     if (!input.trim() || isTyping) return;
@@ -41,48 +61,95 @@ export default function AICoachScreen() {
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
-    setMessages(prev => [...prev, userMsg]);
+    addMessage(userMsg);
     const userText = input.trim();
     setInput('');
     setIsTyping(true);
+    setError(null);
 
     try {
-      // Call the Supabase Edge Function
-      const { data, error } = await supabase.functions.invoke('ai-chat', {
-        body: {
-          message: userText,
-          habits: habits.map(h => ({
-            name: h.name,
-            category: h.category,
-            current: h.current,
-            target: h.target,
-            unit: h.unit,
-            time: h.time,
-            completedToday: h.completedToday,
-          }))
-        },
-      });
+      // Add timeout of 30 seconds (adjust as needed)
+      const { data, error: fnError } = await withTimeout(
+        supabase.functions.invoke('ai-chat', {
+          body: {
+            message: userText,
+            habits: habits.map(h => ({
+              name: h.name,
+              category: h.category,
+              current: h.current,
+              target: h.target,
+              unit: h.unit,
+              time: h.time,
+              completedToday: h.completedToday,
+            })),
+          },
+        }),
+        30000 // 30 second timeout
+      );
 
-      if (error) throw error;
+      // Log for debugging (remove in production)
+      console.log('AI Response:', JSON.stringify({ data, fnError }));
+
+      if (fnError) {
+        console.error('Function error:', fnError);
+        throw new Error(fnError.message || 'Function returned an error');
+      }
+
+      // Handle various response formats
+      const reply = data?.reply || data?.response || data?.message || data?.text;
+
+      if (!reply) {
+        console.error('No reply in response:', data);
+        throw new Error('Empty response from AI');
+      }
 
       const aiMsg: AIMessage = {
         id: (Date.now() + 1).toString(),
         role: 'ai',
-        text: data.reply || "I'm having trouble connecting right now.",
+        text: reply,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
 
-      setMessages(prev => [...prev, aiMsg]);
+      addMessage(aiMsg);
+
     } catch (err: any) {
-      const errorMsg: AIMessage = {
-        id: (Date.now() + 1).toString(),
-        role: 'ai',
-        text: "⚠️ Sorry, I encountered an error. Please make sure the AI service is configured correctly.",
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      };
-      setMessages(prev => [...prev, errorMsg]);
+      console.error('AI Chat Error:', err);
+
+      let errorMessage = "Sorry, I couldn't process that. Please try again.";
+
+      if (err.message?.includes('timed out')) {
+        errorMessage = "⏱️ The request took too long. Please try a shorter question.";
+      } else if (err.message?.includes('Failed to fetch') || err.message?.includes('Network')) {
+        errorMessage = "📡 Network error. Please check your connection.";
+      } else if (err.message?.includes('Empty response')) {
+        errorMessage = "🤖 The AI returned an empty response. The service might be starting up.";
+      } else if (err.status === 429) {
+        errorMessage = "⚠️ Too many requests. Please wait a moment and try again.";
+      } else if (err.status === 500 || err.status === 502 || err.status === 503) {
+        errorMessage = "🔧 The AI service is temporarily unavailable. Please try again in a minute.";
+      }
+
+      handleError(errorMessage);
     } finally {
       setIsTyping(false);
+    }
+  };
+
+  const retryLastMessage = () => {
+    if (messages.length === 0) return;
+    const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+    if (lastUserMsg) {
+      // Remove the last AI message or error
+      setMessages(prev => {
+        const newMsgs = [...prev];
+        const lastIdx = newMsgs.length - 1;
+        if (newMsgs[lastIdx]?.role === 'ai') {
+          newMsgs.pop();
+        }
+        return newMsgs;
+      });
+      setError(null);
+      setInput(lastUserMsg.text);
     }
   };
 
@@ -109,7 +176,7 @@ export default function AICoachScreen() {
             <View>
               <Text style={styles.headerTitle}>AI Coach</Text>
               <Text style={styles.headerStatus}>
-                {isTyping ? 'Typing...' : 'Online · Ready to help'}
+                {isTyping ? 'Thinking...' : 'Online · Ready to help'}
               </Text>
             </View>
           </View>
@@ -126,9 +193,8 @@ export default function AICoachScreen() {
               key={i}
               style={styles.quickBtn}
               activeOpacity={0.7}
-              onPress={() => {
-                setInput(action.prompt);
-              }}
+              onPress={() => setInput(action.prompt)}
+              disabled={isTyping}
             >
               <View style={[styles.quickIcon, { backgroundColor: action.color + '18' }]}>
                 <Ionicons name={action.icon as any} size={16} color={action.color} />
@@ -145,7 +211,7 @@ export default function AICoachScreen() {
           contentContainerStyle={styles.chatContent}
           showsVerticalScrollIndicator={false}
         >
-          {/* NEW: Empty State when there are no messages */}
+          {/* Empty State */}
           {messages.length === 0 && !isTyping && (
             <View style={styles.emptyContainer}>
               <View style={styles.emptyIconWrap}>
@@ -175,18 +241,12 @@ export default function AICoachScreen() {
                 ]}
               >
                 <Text
-                  style={[
-                    styles.msgText,
-                    msg.role === 'user' && styles.msgTextUser,
-                  ]}
+                  style={[styles.msgText, msg.role === 'user' && styles.msgTextUser]}
                 >
                   {msg.text}
                 </Text>
                 <Text
-                  style={[
-                    styles.msgTime,
-                    msg.role === 'user' && styles.msgTimeUser,
-                  ]}
+                  style={[styles.msgTime, msg.role === 'user' && styles.msgTimeUser]}
                 >
                   {msg.timestamp}
                 </Text>
@@ -201,12 +261,19 @@ export default function AICoachScreen() {
                 <Ionicons name="sparkles" size={14} color={Colors.textInverse} />
               </View>
               <View style={[styles.msgBubble, styles.msgBubbleAI, styles.typingBubble]}>
-                <View style={styles.typingDots}>
-                  <View style={styles.typingDot} />
-                  <View style={[styles.typingDot, { opacity: 0.6 }]} />
-                  <View style={[styles.typingDot, { opacity: 0.3 }]} />
-                </View>
+                <ActivityIndicator size="small" color={Colors.primary} />
               </View>
+            </View>
+          )}
+
+          {/* Error with Retry */}
+          {error && !isTyping && (
+            <View style={styles.errorContainer}>
+              <Text style={styles.errorText}>{error}</Text>
+              <TouchableOpacity style={styles.retryBtn} onPress={retryLastMessage}>
+                <Ionicons name="refresh" size={14} color={Colors.primary} />
+                <Text style={styles.retryText}>Retry</Text>
+              </TouchableOpacity>
             </View>
           )}
         </ScrollView>
@@ -232,7 +299,11 @@ export default function AICoachScreen() {
               onPress={handleSend}
               disabled={!input.trim() || isTyping}
             >
-              <Ionicons name="arrow-up" size={20} color={Colors.textInverse} />
+              {isTyping ? (
+                <ActivityIndicator size="small" color={Colors.textInverse} />
+              ) : (
+                <Ionicons name="arrow-up" size={20} color={Colors.textInverse} />
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -251,10 +322,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.xxl,
     paddingVertical: Spacing.lg,
   },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
+  headerLeft: { flexDirection: 'row', alignItems: 'center' },
   aiAvatar: {
     width: 38,
     height: 38,
@@ -264,16 +332,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: Spacing.md,
   },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: Colors.text,
-  },
-  headerStatus: {
-    fontSize: 12,
-    color: Colors.success,
-    fontWeight: '500',
-  },
+  headerTitle: { fontSize: 18, fontWeight: '700', color: Colors.text },
+  headerStatus: { fontSize: 12, color: Colors.success, fontWeight: '500' },
   quickActions: {
     paddingHorizontal: Spacing.xxl,
     paddingBottom: Spacing.lg,
@@ -283,14 +343,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: Colors.card,
     borderRadius: Radius.sm,
-    paddingVertical: 6,          // Slimmed down
+    paddingVertical: 6,
     paddingHorizontal: Spacing.md,
     shadowColor: Colors.shadow,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 1,
     shadowRadius: 3,
     elevation: 1,
-    height: 60
+    height: 60,
+    opacity: 1,
   },
   quickIcon: {
     width: 26,
@@ -298,20 +359,11 @@ const styles = StyleSheet.create({
     borderRadius: Radius.sm,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 2,             // Tightened gap
+    marginBottom: 2,
   },
-  quickLabel: {
-    fontSize: 10,                 // Slightly smaller text
-    fontWeight: '600',
-    color: Colors.textSecondary,
-  },
-  chatArea: {
-    paddingHorizontal: Spacing.xxl,
-  },
-  chatContent: {
-    paddingBottom: Spacing.lg,
-  },
-  // NEW: Empty State Styles
+  quickLabel: { fontSize: 10, fontWeight: '600', color: Colors.textSecondary },
+  chatArea: { paddingHorizontal: Spacing.xxl },
+  chatContent: { paddingBottom: Spacing.lg },
   emptyContainer: {
     flex: 1,
     alignItems: 'center',
@@ -328,26 +380,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: Spacing.lg,
   },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: Colors.text,
-    marginBottom: Spacing.xs,
-  },
-  emptySub: {
-    fontSize: 14,
-    color: Colors.textTertiary,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  msgRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    marginBottom: Spacing.md,
-  },
-  msgRowRight: {
-    justifyContent: 'flex-end',
-  },
+  emptyTitle: { fontSize: 18, fontWeight: '700', color: Colors.text, marginBottom: Spacing.xs },
+  emptySub: { fontSize: 14, color: Colors.textTertiary, textAlign: 'center', lineHeight: 20 },
+  msgRow: { flexDirection: 'row', alignItems: 'flex-end', marginBottom: Spacing.md },
+  msgRowRight: { justifyContent: 'flex-end' },
   msgAvatar: {
     width: 26,
     height: 26,
@@ -358,11 +394,7 @@ const styles = StyleSheet.create({
     marginRight: Spacing.sm,
     marginBottom: 16,
   },
-  msgBubble: {
-    maxWidth: '80%',
-    borderRadius: Radius.lg,
-    padding: Spacing.md,
-  },
+  msgBubble: { maxWidth: '80%', borderRadius: Radius.lg, padding: Spacing.md },
   msgBubbleAI: {
     backgroundColor: Colors.card,
     borderBottomLeftRadius: Radius.xs,
@@ -372,41 +404,30 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 1,
   },
-  msgBubbleUser: {
-    backgroundColor: Colors.primary,
-    borderBottomRightRadius: Radius.xs,
+  msgBubbleUser: { backgroundColor: Colors.primary, borderBottomRightRadius: Radius.xs },
+  msgText: { fontSize: 14, color: Colors.text, lineHeight: 20 },
+  msgTextUser: { color: Colors.textInverse },
+  msgTime: { fontSize: 10, color: Colors.textTertiary, marginTop: Spacing.xs, textAlign: 'right' },
+  msgTimeUser: { color: 'rgba(255,255,255,0.6)' },
+  typingBubble: { paddingVertical: Spacing.md + 4, paddingHorizontal: Spacing.lg + 4 },
+  // Error styles
+  errorContainer: {
+    backgroundColor: '#FEF2F2',
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+    borderLeftWidth: 3,
+    borderLeftColor: '#EF4444',
   },
-  msgText: {
-    fontSize: 14,
-    color: Colors.text,
-    lineHeight: 20,
-  },
-  msgTextUser: {
-    color: Colors.textInverse,
-  },
-  msgTime: {
-    fontSize: 10,
-    color: Colors.textTertiary,
-    marginTop: Spacing.xs,
-    textAlign: 'right',
-  },
-  msgTimeUser: {
-    color: 'rgba(255,255,255,0.6)',
-  },
-  typingBubble: {
-    paddingVertical: Spacing.md + 4,
-    paddingLeft: Spacing.lg + 4,
-  },
-  typingDots: {
+  errorText: { fontSize: 13, color: '#991B1B', lineHeight: 18 },
+  retryBtn: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 4,
+    marginTop: Spacing.sm,
+    alignSelf: 'flex-start',
   },
-  typingDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: Colors.textTertiary,
-  },
+  retryText: { fontSize: 13, color: Colors.primary, fontWeight: '600' },
   inputBar: {
     paddingHorizontal: Spacing.xxl,
     paddingVertical: Spacing.md,
@@ -425,13 +446,7 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.sm,
     minHeight: 48,
   },
-  input: {
-    flex: 1,
-    fontSize: 14,
-    color: Colors.text,
-    maxHeight: 100,
-    paddingVertical: Spacing.xs,
-  },
+  input: { flex: 1, fontSize: 14, color: Colors.text, maxHeight: 100, paddingVertical: Spacing.xs },
   sendBtn: {
     width: 36,
     height: 36,
@@ -440,10 +455,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginLeft: Spacing.sm,
   },
-  sendBtnActive: {
-    backgroundColor: Colors.primary,
-  },
-  sendBtnInactive: {
-    backgroundColor: Colors.border,
-  },
+  sendBtnActive: { backgroundColor: Colors.primary },
+  sendBtnInactive: { backgroundColor: Colors.border },
 });

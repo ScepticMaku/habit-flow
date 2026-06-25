@@ -124,7 +124,7 @@ export default function VerifyCodeScreen() {
     } else {
       // Signup confirmation flow — use resend
       const result = await supabase.auth.resend({
-        type: 'signup',
+        type: otpType,
         email,
       });
       error = result.error;

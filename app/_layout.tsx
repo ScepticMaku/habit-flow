@@ -33,30 +33,29 @@ function RootNavigator() {
       segments[0] === 'sign-up' ||
       segments[0] === 'forgot-password' ||
       segments[0] === 'verify-code' ||
-      segments[0] === 'reset-password' ||
       segments[0] === 'confirm-email';
 
+    // 1. Not logged in, trying to access a protected page -> Kick out
     if (!session && !inAuthGroup) {
       router.replace('/');
-    } else if (session && inAuthGroup) {
+    }
+    // 2. JUST logged in via OTP, but URL hasn't updated to reset-password yet -> DO NOTHING (pauses the guard)
+    else if (session && segments[0] === 'verify-code') {
+      return;
+    }
+    // 3. Logged in, hanging out on auth pages (sign-up, forgot, etc) -> Go to Home
+    else if (session && inAuthGroup) {
       router.replace('/(tabs)/home');
-    } else if (session && !inAuthGroup) {
-      // If logged in but has NO habits, send to onboarding
-      if (habits.length === 0 && segments[0] !== 'onboarding') {
+    }
+    // 4. Logged in, on a normal page
+    else if (session && !inAuthGroup) {
+      // Send to onboarding if no habits, EXCEPT if they are on the reset-password screen
+      if (habits.length === 0 && segments[0] !== 'onboarding' && segments[0] !== 'reset-password') {
         router.replace('/onboarding');
       }
     }
-  }, [isReady, session, authLoading, habitsLoading, habits, segments]);
+  }, [isReady, session, authLoading, habitsLoading, habits, segments]); return (
 
-  if (authLoading || habitsLoading || !isReady) {
-    return (
-      <View style={{ flex: 1, backgroundColor: Colors.bg, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator size="large" color={Colors.primary} />
-      </View>
-    );
-  }
-
-  return (
     <Stack
       screenOptions={{
         headerShadowVisible: false,
